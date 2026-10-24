@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+build/
+*.spec
+dist/
+
+# Pastas locais com fotos dos imóveis (não publicar).
+/[0-9]*/
+*.heic
+*.HEIC
+*.heif
+*.HEIF
+
+# Configurações e credenciais locais.
+.env
+.env.*
+!.env.example
