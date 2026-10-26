@@ -52,11 +52,14 @@ def run_batch(work, quality, events, accelerated, max_workers, output_folder=Non
 def format_size(size):
     if size is None:
         return '—'
-    if size < 1024:
-        return f'{size} B'
-    if size < 1024 ** 2:
-        return f'{size / 1024:.1f} KB'.replace('.', ',')
-    return f'{size / 1024 ** 2:.2f} MB'.replace('.', ',')
+    value = float(size)
+    for unit in ('B', 'KB', 'MB', 'GB', 'TB', 'PB'):
+        if abs(value) < 1000 or unit == 'PB':
+            digits = 0 if unit == 'B' or abs(value) >= 10 else 2
+            number = f'{value:.{digits}f}'
+            if digits: number = number.rstrip('0').rstrip('.')
+            return f'{number.replace(".", ",")} {unit}'
+        value /= 1000
 
 
 def format_reduction(before, after):

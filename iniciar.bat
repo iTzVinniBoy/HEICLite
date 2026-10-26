@@ -1,11 +1,7 @@
 @echo off
 cd /d "%~dp0"
-if exist "dist\versao-1.2\Conversor HEIC JPEG.exe" (
-    start "" "dist\versao-1.2\Conversor HEIC JPEG.exe"
-    exit /b
-)
-if exist "dist\Conversor HEIC JPEG.exe" (
-    start "" "dist\Conversor HEIC JPEG.exe"
+if exist "dist\versao-2.11\HEICLite.exe" (
+    start "" "dist\versao-2.11\HEICLite.exe"
     exit /b
 )
 if not exist ".venv\Scripts\pythonw.exe" (

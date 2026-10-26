@@ -1,0 +1,1 @@
+Conversor HEIC/HEIF para JPEG no Windows, com conversão em massa automática de subpastas, processamento paralelo, backup verificado dos originais, acesso administrativo ao modo de vistorias e temas claro e escuro.

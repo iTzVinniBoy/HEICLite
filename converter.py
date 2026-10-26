@@ -1,13 +1,16 @@
 """Conversão local; nunca apaga o original nem sobrescreve outro arquivo."""
 from pathlib import Path
+import os
+import uuid
 from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
+from safe_files import publish_exclusive
 
 register_heif_opener(thumbnails=False)
 EXTENSIONS = {'.heic', '.heif'}
 
 
-def convert_photo(source: Path, quality: int = 90, output_folder: Path | None = None) -> Path:
+def convert_photo(source: Path, quality: int = 75, output_folder: Path | None = None, output_stem: str | None = None, *, source_stream=None) -> Path:
     source = Path(source)
     if source.suffix.lower() not in EXTENSIONS:
         raise ValueError('Selecione uma foto HEIC ou HEIF.')
@@ -16,7 +19,8 @@ def convert_photo(source: Path, quality: int = 90, output_folder: Path | None = 
     destination = source.parent if output_folder is None else Path(output_folder)
     if not destination.is_dir():
         raise ValueError('A pasta de destino não existe ou não está disponível.')
-    with Image.open(source) as original:
+    if source_stream is not None: source_stream.seek(0)
+    with Image.open(source_stream if source_stream is not None else source) as original:
         original.load()
         photo = ImageOps.exif_transpose(original)
         if 'A' in photo.getbands():
@@ -31,23 +35,25 @@ def convert_photo(source: Path, quality: int = 90, output_folder: Path | None = 
             options['exif'] = exif.tobytes()
         if photo.info.get('icc_profile'):
             options['icc_profile'] = photo.info['icc_profile']
-        number = 0
-        while True:
-            suffix = '' if number == 0 else f' ({number})'
-            output = destination / f'{source.stem}{suffix}.jpg'
-            try:
-                stream = output.open('xb')
-                break
-            except FileExistsError:
-                number += 1
+        temporary = destination / f'.heiclite-{uuid.uuid4().hex}.part'
         try:
-            with stream:
+            with temporary.open('xb') as stream:
                 rgb.save(stream, format='JPEG', **options)
-            with Image.open(output) as check:
+                stream.flush()
+                os.fsync(stream.fileno())
+            with Image.open(temporary) as check:
                 check.load()
                 if check.format != 'JPEG' or check.size != rgb.size:
                     raise ValueError('Não foi possível validar o JPEG.')
-        except Exception:
-            output.unlink(missing_ok=True)
-            raise
+            number = 0
+            while True:
+                suffix = '' if number == 0 else f' ({number})'
+                output = destination / f'{output_stem or source.stem}{suffix}.jpg'
+                try:
+                    publish_exclusive(temporary, output)
+                    break
+                except FileExistsError:
+                    number += 1
+        finally:
+            temporary.unlink(missing_ok=True)
     return output

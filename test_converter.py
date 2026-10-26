@@ -88,15 +88,15 @@ class ConversionTests(unittest.TestCase):
             app.worker(work, 90)
             app.poll()
             self.assertEqual(len(app.successes), 1)
-            self.assertEqual(str(app.convert_button['state']), 'disabled')
-            self.assertEqual(str(app.select_button['state']), 'normal')
+            self.assertEqual(str(app.convert_button.cget('state')), 'disabled')
+            self.assertFalse(hasattr(app, 'select_button'))
             self.assertEqual(app.tree.set(work[0][0], 'reduction'), format_reduction(source.stat().st_size, next(iter(app.successes.values()))[0].stat().st_size))
-            self.assertEqual(app.summary_label['text'], format_summary(app.converted_sizes.values()))
+            self.assertEqual(app.summary_label.cget('text'), format_summary(app.converted_sizes.values()))
             app.deiconify()
             app.update()
-            self.assertEqual(tuple(map(int, app.resizable())), (0, 0))
+            self.assertEqual(tuple(map(int, app.resizable())), (1, 1))
             self.assertLess(app.convert_button.winfo_rooty() + app.convert_button.winfo_height(), app.tree.winfo_rooty())
-            self.assertLessEqual(app.select_button.winfo_rooty() + app.select_button.winfo_height(), app.winfo_rooty() + app.winfo_height())
+            self.assertLessEqual(app.timing_label.winfo_rooty() + app.timing_label.winfo_height(), app.winfo_rooty() + app.winfo_height())
             app.clear()
             self.assertEqual(len(app.paths), 0)
             self.assertEqual(len(app.converted_sizes), 0)
@@ -197,7 +197,7 @@ class ConversionTests(unittest.TestCase):
                     app.converted_sizes['example'] = (10000, 5000)
                     app.update_summary()
                     app.update()
-                    for button in [app.convert_button, app.accelerate_button, app.select_button, app.destination_button, app.quality_box, app.summary_label]:
+                    for button in [app.convert_button, app.timing_label, app.destination_button, app.quality_box, app.summary_label]:
                         self.assertGreater(button.winfo_height(), 1)
                         self.assertGreaterEqual(button.winfo_rooty(), app.winfo_rooty())
                         self.assertLessEqual(button.winfo_rooty() + button.winfo_height(), app.winfo_rooty() + app.winfo_height())
@@ -255,8 +255,11 @@ class ConversionTests(unittest.TestCase):
         app.withdraw()
         try:
             app.add_paths([self.photo()])
-            self.assertEqual(app.destination_mode.get(), 'same')
-            self.assertIn('75', app.quality_box['values'])
+            self.assertEqual(app.destination_mode.get(), 'other')
+            self.assertIn('75', app.quality_box.cget('values'))
+            self.assertEqual(app.quality.get(), '75')
+            self.assertTrue(app.accelerated.is_set())
+            self.assertEqual(app.max_workers, min(4, os.cpu_count() or 1))
             with patch('app.messagebox.showerror') as error:
                 for quality in ['', 'abc', '0', '101', '75.5']:
                     app.quality.set(quality)
@@ -266,24 +269,63 @@ class ConversionTests(unittest.TestCase):
                 app.quality.set('75')
                 app.destination_mode.set('other')
                 app.update_destination()
-                self.assertEqual(str(app.destination_button['state']), 'normal')
+                self.assertEqual(str(app.destination_button.cget('state')), 'normal')
                 app.start()
                 self.assertFalse(app.busy)
                 self.assertEqual(error.call_count, 6)
             destination = self.folder / 'destino'
             destination.mkdir()
-            with patch('app.filedialog.askdirectory', return_value=str(destination)):
+            with patch('ui.choose_directory', return_value=str(destination)):
                 app.choose_destination()
             self.assertEqual(app.destination_path.get(), str(destination.resolve()))
-            app.destination_mode.set('same')
-            app.update_destination()
-            self.assertEqual(str(app.destination_button['state']), 'disabled')
+            with patch('ui.choose_directory', return_value=''):
+                app.choose_destination()
+            self.assertEqual(app.destination_mode.get(), 'other')
+            self.assertEqual(app.destination_path.get(), str(destination.resolve()))
         finally:
             for timer in app.tk.call('after', 'info'):
                 app.after_cancel(timer)
             app.destroy()
             del app
             gc.collect()
+
+    def test_inspection_tab_requests_admin_without_switching(self):
+        app = App()
+        app.withdraw()
+        try:
+            with patch('ui.is_admin',return_value=False), patch('ui.launch_admin') as launch:
+                app.switch_mode('Vistorias')
+                launch.assert_called_once_with('--vistorias-admin')
+                self.assertEqual(app.mode,'Fotos')
+            with patch('ui.is_admin',return_value=True):
+                app.switch_mode('Vistorias')
+                app.update()
+                self.assertEqual(app.mode,'Vistorias')
+                self.assertTrue(app.inspection_controls.winfo_manager())
+        finally:
+            for timer in app.tk.call('after','info'): app.after_cancel(timer)
+            app.destroy()
+            del app
+            gc.collect()
+
+    def test_inspection_folder_selection_accumulates_and_cancels(self):
+        app=App()
+        app.withdraw()
+        try:
+            a=self.folder/'A'; b=self.folder/'B'
+            a.mkdir(); b.mkdir()
+            with patch('ui.choose_native_folder',return_value=[str(a),str(b)]) as picker:
+                app.choose_path(app.root_path)
+                self.assertTrue(picker.call_args.kwargs['multiple'])
+            self.assertEqual(app.inspection_roots,[a,b])
+            self.assertIn('2 pastas',app.root_path.get())
+            with patch('ui.choose_native_folder',return_value=[]): app.choose_path(app.root_path)
+            self.assertEqual(app.inspection_roots,[a,b])
+            with patch('ui.choose_native_folder',return_value=[str(a)]): app.choose_path(app.root_path)
+            self.assertEqual(app.inspection_roots,[a,b])
+        finally:
+            for timer in app.tk.call('after','info'): app.after_cancel(timer)
+            app.destroy(); del app; gc.collect()
 
     def test_summary_excludes_failures_and_includes_previous_successes(self):
         app = App()
@@ -296,14 +338,14 @@ class ConversionTests(unittest.TestCase):
             app.worker(list(app.paths.items()), 75)
             app.poll()
             self.assertEqual(len(app.converted_sizes), 1)
-            self.assertIn('1 falha(s), fora dos totais.', app.summary_label['text'])
+            self.assertIn('1 falha(s), fora dos totais.', app.summary_label.cget('text'))
             second = self.photo('segunda.heic')
             app.add_paths([second])
             pending = [(row, path) for row, path in app.paths.items() if row not in app.successes]
             app.worker(pending, 75)
             app.poll()
             self.assertEqual(len(app.converted_sizes), 2)
-            self.assertIn('Total convertido (2 foto(s))', app.summary_label['text'])
+            self.assertIn('Total convertido (2 foto(s))', app.summary_label.cget('text'))
         finally:
             for timer in app.tk.call('after', 'info'):
                 app.after_cancel(timer)
@@ -315,6 +357,13 @@ class ConversionTests(unittest.TestCase):
     def test_frozen_executable_workers(self):
         executable = Path(os.environ['HEIC_TEST_EXECUTABLE']).resolve()
         self.assertTrue(executable.is_file())
+        interface_report = self.folder / 'interface.json'
+        subprocess.run([str(executable), '--verificar-interface', str(interface_report)], check=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+        interface = json.loads(interface_report.read_text(encoding='utf-8'))
+        self.assertEqual(interface['quality'], '75')
+        self.assertEqual(interface['mode'], 'Fotos')
+        self.assertTrue(interface['button_visible'])
+        self.assertTrue(interface['drop_received'])
         first = self.photo('mesmo.heic')
         second = self.photo('mesmo.heif')
         existing = self.folder / 'mesmo.jpg'
